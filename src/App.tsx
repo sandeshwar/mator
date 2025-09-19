@@ -18,7 +18,7 @@ import {
   getDailyChallengeOfDay,
   getPersonalizedModules,
 } from './utils/gameLogic';
-import { DailyChallenge, LearningModule, UserProfile } from './types';
+import { DailyChallenge, DailyChallengeRunSummary, LearningModule, UserProfile } from './types';
 
 const todayKey = () => new Date().toISOString().split('T')[0];
 
@@ -36,6 +36,7 @@ export default function App() {
   const [dailyRecord, setDailyRecord] = usePersistentState<DailyRecord>('mathquest-daily-record', initialDailyRecord);
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [pulseMessage, setPulseMessage] = useState<string | null>(null);
+  const [lastChallengeSummary, setLastChallengeSummary] = useState<DailyChallengeRunSummary | null>(null);
 
   useEffect(() => {
     if (profile && !activeModuleId) {
@@ -149,8 +150,18 @@ export default function App() {
   );
 
   const handleChallengeComplete = useCallback(
-    (challenge: DailyChallenge) => {
+    (challenge: DailyChallenge, summary: DailyChallengeRunSummary) => {
       if (!profile) return;
+
+      setLastChallengeSummary(summary);
+
+      if (!summary.completed) {
+        pushCelebration(
+          `${challenge.title} session logged • ${summary.solved} solved • ${summary.accuracy}% accuracy • Best streak ${summary.bestCombo}`
+        );
+        return;
+      }
+
       const todayKeyed = todayKey();
       const updatedRecord: DailyRecord =
         dailyRecord.date === todayKeyed
@@ -177,7 +188,9 @@ export default function App() {
         };
       });
 
-      pushCelebration(`Daily challenge cleared! +${pointsAwarded} pts 🎯`);
+      pushCelebration(
+        `${challenge.title} cleared • ${summary.solved} solved • ${summary.accuracy}% accuracy • Best streak ${summary.bestCombo} +${pointsAwarded} pts 🎯`
+      );
     },
     [dailyRecord, progress, profile, pushCelebration, setDailyRecord, setTotalPoints, totalPoints, updateProfile]
   );
@@ -219,6 +232,7 @@ export default function App() {
             challenge={todayChallenge}
             completed={dailyCompleted}
             onComplete={handleChallengeComplete}
+            summary={lastChallengeSummary}
           />
 
           <RewardCenter badges={rewardBadges} unlocked={profile.badges} streak={profile.streak} totalPoints={totalPoints} />
