@@ -18,7 +18,7 @@ import {
   getDailyChallengeOfDay,
   getPersonalizedModules,
 } from './utils/gameLogic';
-import { DailyChallenge, LearningModule, UserProfile } from './types';
+import { DailyChallenge, LearningModule, ScenarioCompletionPayload, UserProfile } from './types';
 
 const todayKey = () => new Date().toISOString().split('T')[0];
 
@@ -33,6 +33,10 @@ export default function App() {
   const [profile, setProfile] = usePersistentState<UserProfile | null>('mathquest-profile', null);
   const [totalPoints, setTotalPoints] = usePersistentState<number>('mathquest-total-points', 0);
   const [completedModules, setCompletedModules] = usePersistentState<string[]>('mathquest-completed-modules', []);
+  const [completedScenarios, setCompletedScenarios] = usePersistentState<string[]>(
+    'mathquest-completed-scenarios',
+    []
+  );
   const [dailyRecord, setDailyRecord] = usePersistentState<DailyRecord>('mathquest-daily-record', initialDailyRecord);
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [pulseMessage, setPulseMessage] = useState<string | null>(null);
@@ -182,6 +186,54 @@ export default function App() {
     [dailyRecord, progress, profile, pushCelebration, setDailyRecord, setTotalPoints, totalPoints, updateProfile]
   );
 
+  const handleScenarioComplete = useCallback(
+    ({ scenarioId, reward }: ScenarioCompletionPayload) => {
+      if (!profile) return;
+      if (completedScenarios.includes(scenarioId)) {
+        pushCelebration('Scenario already logged—keep exploring! ✅');
+        return;
+      }
+
+      setCompletedScenarios([...completedScenarios, scenarioId]);
+
+      const totalAfter = totalPoints + reward.points;
+      setTotalPoints(totalAfter);
+
+      updateProfile((current) => {
+        const streakReady = evaluateStreak(current, true);
+        const autoUnlocked = evaluateBadgeUnlocks(
+          streakReady,
+          reward.points,
+          totalAfter,
+          progress,
+          rewardBadges
+        );
+        const badgeSet = new Set(autoUnlocked);
+        if (reward.badgeId) {
+          badgeSet.add(reward.badgeId);
+        }
+
+        return {
+          ...streakReady,
+          badges: Array.from(badgeSet),
+        };
+      });
+
+      pushCelebration(reward.celebration);
+    },
+    [
+      completedScenarios,
+      progress,
+      profile,
+      pushCelebration,
+      rewardBadges,
+      setCompletedScenarios,
+      setTotalPoints,
+      totalPoints,
+      updateProfile,
+    ]
+  );
+
   if (!profile) {
     return <OnboardingAdventure onComplete={handleOnboardingComplete} />;
   }
@@ -211,7 +263,11 @@ export default function App() {
             onComplete={handleModuleComplete}
           />
 
-          <ScenarioShowcase focus={profile.focus} />
+          <ScenarioShowcase
+            focus={profile.focus}
+            completedScenarioIds={completedScenarios}
+            onScenarioComplete={handleScenarioComplete}
+          />
         </div>
 
         <div className="space-y-6">

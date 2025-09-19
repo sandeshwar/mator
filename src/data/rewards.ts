@@ -19,4 +19,16 @@ export const rewardBadges: RewardBadge[] = [
     description: 'Complete all checkpoints on the Progress Map.',
     threshold: 4,
   },
+  {
+    id: 'probability-forest-strategist',
+    name: 'Probability Forest Strategist',
+    description: 'Complete the Risk Sprint scenario with optimal pacing.',
+    threshold: 1,
+  },
+  {
+    id: 'probability-forest-guardian',
+    name: 'Forest Guardian',
+    description: 'Stabilise every lever inside the Safety Net scenario.',
+    threshold: 1,
+  },
 ];
