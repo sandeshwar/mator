@@ -37,6 +37,31 @@ export interface LearningModule {
   miniGame: ModuleMiniGame;
 }
 
+export interface DailyChallengePrompt {
+  id: string;
+  question: string;
+  choices: string[];
+  correctIndex: number;
+  hint?: string;
+}
+
+export interface DailyChallengeRunResult {
+  promptId: string;
+  correct: boolean;
+}
+
+export interface DailyChallengeRunSummary {
+  challengeId: string;
+  solved: number;
+  correct: number;
+  accuracy: number;
+  bestCombo: number;
+  completed: boolean;
+  allSolved: boolean;
+  timeElapsedSeconds: number;
+  results: DailyChallengeRunResult[];
+}
+
 export interface DailyChallenge {
   id: string;
   title: string;
@@ -47,6 +72,10 @@ export interface DailyChallenge {
     streakBonus?: number;
   };
   tasks: string[];
+  prompts?: DailyChallengePrompt[];
+  scoring?: {
+    comboBonus?: number;
+  };
 }
 
 export interface RewardBadge {
@@ -60,6 +89,13 @@ export interface ProgressSnapshot {
   unlockedCount: number;
   totalCount: number;
   completionRate: number;
+}
+
+export interface LeaderboardEntry {
+  uid: string;
+  name: string;
+  avatar: string;
+  points: number;
 }
 
 export interface ScenarioParameter {

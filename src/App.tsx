@@ -10,6 +10,7 @@ import { ScenarioShowcase } from './components/ScenarioShowcase';
 import { dailyChallenges } from './data/dailyChallenges';
 import { learningModules } from './data/modules';
 import { rewardBadges } from './data/rewards';
+import { DailyRecord, useCloudProfile } from './hooks/useCloudProfile';
 import { usePersistentState } from './hooks/usePersistentState';
 import {
   computeProgress,
@@ -18,28 +19,34 @@ import {
   getDailyChallengeOfDay,
   getPersonalizedModules,
 } from './utils/gameLogic';
-import { DailyChallenge, LearningModule, ScenarioCompletionPayload, UserProfile } from './types';
+import {
+  DailyChallenge,
+  DailyChallengeRunSummary,
+  LearningModule,
+  ScenarioCompletionPayload,
+  UserProfile,
+} from './types';
 
 const todayKey = () => new Date().toISOString().split('T')[0];
 
-type DailyRecord = {
-  date: string;
-  completed: string[];
-};
-
-const initialDailyRecord: DailyRecord = { date: '', completed: [] };
-
 export default function App() {
-  const [profile, setProfile] = usePersistentState<UserProfile | null>('mathquest-profile', null);
-  const [totalPoints, setTotalPoints] = usePersistentState<number>('mathquest-total-points', 0);
-  const [completedModules, setCompletedModules] = usePersistentState<string[]>('mathquest-completed-modules', []);
+  const {
+    profile,
+    totalPoints,
+    completedModules,
+    dailyRecord,
+    leaderboard,
+    syncProfile,
+    recordDailyRun,
+    completeOnboarding,
+  } = useCloudProfile();
   const [completedScenarios, setCompletedScenarios] = usePersistentState<string[]>(
     'mathquest-completed-scenarios',
     []
   );
-  const [dailyRecord, setDailyRecord] = usePersistentState<DailyRecord>('mathquest-daily-record', initialDailyRecord);
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [pulseMessage, setPulseMessage] = useState<string | null>(null);
+  const [lastChallengeSummary, setLastChallengeSummary] = useState<DailyChallengeRunSummary | null>(null);
 
   useEffect(() => {
     if (profile && !activeModuleId) {
@@ -55,11 +62,12 @@ export default function App() {
 
   const handleOnboardingComplete = useCallback(
     (nextProfile: UserProfile) => {
-      setProfile(nextProfile);
-      setActiveModuleId(nextProfile.unlockedModules[0] ?? null);
-      setPulseMessage('Welcome to MathQuest! 🚀');
+      void completeOnboarding(nextProfile).then((normalized) => {
+        setActiveModuleId(normalized.unlockedModules[0] ?? null);
+        setPulseMessage('Welcome to MathQuest! 🚀');
+      });
     },
-    [setProfile]
+    [completeOnboarding]
   );
 
   const personalizedModules = useMemo(() => {
@@ -92,16 +100,6 @@ export default function App() {
   const today = todayKey();
   const dailyCompleted = dailyRecord.date === today && dailyRecord.completed.includes(todayChallenge.id);
 
-  const updateProfile = useCallback(
-    (updater: (current: UserProfile) => UserProfile) => {
-      setProfile((current) => {
-        if (!current) return current;
-        return updater(current);
-      });
-    },
-    [setProfile]
-  );
-
   const pushCelebration = useCallback((message: string) => {
     setPulseMessage(message);
   }, []);
@@ -119,27 +117,29 @@ export default function App() {
       }
 
       const totalAfter = totalPoints + pointsAwarded;
-      setTotalPoints(totalAfter);
-      setCompletedModules((prev) => Array.from(new Set([...prev, module.id])));
+      const updatedCompleted = Array.from(new Set([...completedModules, module.id]));
+      const streakReady = evaluateStreak(profile, true, dailyRecord.date);
+      const enhancedProfile: UserProfile = {
+        ...streakReady,
+        unlockedModules: Array.from(nextUnlocked),
+      };
+      const badges = evaluateBadgeUnlocks(
+        enhancedProfile,
+        pointsAwarded,
+        totalAfter,
+        computeProgress(personalizedModules, Array.from(nextUnlocked)),
+        rewardBadges
+      );
 
-      updateProfile((current) => {
-        const streakReady = evaluateStreak(current, true);
-        const enhancedProfile: UserProfile = {
-          ...streakReady,
-          unlockedModules: Array.from(nextUnlocked),
-        };
-        const badges = evaluateBadgeUnlocks(
-          enhancedProfile,
-          pointsAwarded,
-          totalAfter,
-          computeProgress(personalizedModules, Array.from(nextUnlocked)),
-          rewardBadges
-        );
+      const nextProfile: UserProfile = {
+        ...enhancedProfile,
+        badges,
+      };
 
-        return {
-          ...enhancedProfile,
-          badges,
-        };
+      void syncProfile({
+        profile: nextProfile,
+        totalPoints: totalAfter,
+        completedModules: updatedCompleted,
       });
 
       if (nextModule) {
@@ -149,41 +149,62 @@ export default function App() {
         pushCelebration(`You mastered ${module.name}! 🎉`);
       }
     },
-    [personalizedModules, profile, setCompletedModules, setTotalPoints, totalPoints, unlockedIds, updateProfile, pushCelebration]
+    [completedModules, dailyRecord.date, personalizedModules, profile, pushCelebration, syncProfile, totalPoints, unlockedIds]
   );
 
   const handleChallengeComplete = useCallback(
-    (challenge: DailyChallenge) => {
+    (challenge: DailyChallenge, summary: DailyChallengeRunSummary) => {
       if (!profile) return;
+
+      setLastChallengeSummary(summary);
+
+      if (!summary.completed) {
+        pushCelebration(
+          `${challenge.title} session logged • ${summary.solved} solved • ${summary.accuracy}% accuracy • Best streak ${summary.bestCombo}`
+        );
+        return;
+      }
+
       const todayKeyed = todayKey();
       const updatedRecord: DailyRecord =
         dailyRecord.date === todayKeyed
-          ? { date: todayKeyed, completed: Array.from(new Set([...dailyRecord.completed, challenge.id])) }
-          : { date: todayKeyed, completed: [challenge.id] };
+          ? {
+              date: todayKeyed,
+              completed: Array.from(new Set([...dailyRecord.completed, challenge.id])),
+              updatedAt: new Date().toISOString(),
+            }
+          : { date: todayKeyed, completed: [challenge.id], updatedAt: new Date().toISOString() };
 
-      setDailyRecord(updatedRecord);
+      void recordDailyRun({
+        date: updatedRecord.date,
+        completed: updatedRecord.completed,
+        pointsAwarded: challenge.reward.points,
+      });
       const pointsAwarded = challenge.reward.points;
       const totalAfter = totalPoints + pointsAwarded;
-      setTotalPoints(totalAfter);
+      const streakReady = evaluateStreak(profile, true, updatedRecord.date ?? dailyRecord.date);
+      const badges = evaluateBadgeUnlocks(
+        streakReady,
+        pointsAwarded,
+        totalAfter,
+        progress,
+        rewardBadges
+      );
+      const nextProfile: UserProfile = {
+        ...streakReady,
+        badges,
+      };
 
-      updateProfile((current) => {
-        const streakReady = evaluateStreak(current, true);
-        const badges = evaluateBadgeUnlocks(
-          streakReady,
-          pointsAwarded,
-          totalAfter,
-          progress,
-          rewardBadges
-        );
-        return {
-          ...streakReady,
-          badges,
-        };
+      void syncProfile({
+        profile: nextProfile,
+        totalPoints: totalAfter,
       });
 
-      pushCelebration(`Daily challenge cleared! +${pointsAwarded} pts 🎯`);
+      pushCelebration(
+        `${challenge.title} cleared • ${summary.solved} solved • ${summary.accuracy}% accuracy • Best streak ${summary.bestCombo} +${pointsAwarded} pts 🎯`
+      );
     },
-    [dailyRecord, progress, profile, pushCelebration, setDailyRecord, setTotalPoints, totalPoints, updateProfile]
+    [dailyRecord, progress, profile, pushCelebration, recordDailyRun, syncProfile, totalPoints]
   );
 
   const handleScenarioComplete = useCallback(
@@ -194,43 +215,45 @@ export default function App() {
         return;
       }
 
-      setCompletedScenarios([...completedScenarios, scenarioId]);
+      const updatedScenarios = [...completedScenarios, scenarioId];
+      setCompletedScenarios(updatedScenarios);
 
       const totalAfter = totalPoints + reward.points;
-      setTotalPoints(totalAfter);
+      const streakReady = evaluateStreak(profile, true, dailyRecord.date);
+      const autoUnlocked = evaluateBadgeUnlocks(
+        streakReady,
+        reward.points,
+        totalAfter,
+        progress,
+        rewardBadges
+      );
+      const badgeSet = new Set(autoUnlocked);
+      if (reward.badgeId) {
+        badgeSet.add(reward.badgeId);
+      }
 
-      updateProfile((current) => {
-        const streakReady = evaluateStreak(current, true);
-        const autoUnlocked = evaluateBadgeUnlocks(
-          streakReady,
-          reward.points,
-          totalAfter,
-          progress,
-          rewardBadges
-        );
-        const badgeSet = new Set(autoUnlocked);
-        if (reward.badgeId) {
-          badgeSet.add(reward.badgeId);
-        }
+      const nextProfile: UserProfile = {
+        ...streakReady,
+        badges: Array.from(badgeSet),
+      };
 
-        return {
-          ...streakReady,
-          badges: Array.from(badgeSet),
-        };
+      void syncProfile({
+        profile: nextProfile,
+        totalPoints: totalAfter,
       });
 
       pushCelebration(reward.celebration);
     },
     [
       completedScenarios,
+      dailyRecord.date,
       progress,
       profile,
       pushCelebration,
       rewardBadges,
       setCompletedScenarios,
-      setTotalPoints,
+      syncProfile,
       totalPoints,
-      updateProfile,
     ]
   );
 
@@ -275,9 +298,16 @@ export default function App() {
             challenge={todayChallenge}
             completed={dailyCompleted}
             onComplete={handleChallengeComplete}
+            summary={lastChallengeSummary}
           />
 
-          <RewardCenter badges={rewardBadges} unlocked={profile.badges} streak={profile.streak} totalPoints={totalPoints} />
+          <RewardCenter
+            badges={rewardBadges}
+            unlocked={profile.badges}
+            streak={profile.streak}
+            totalPoints={totalPoints}
+            leaderboard={leaderboard}
+          />
         </div>
       </div>
 
