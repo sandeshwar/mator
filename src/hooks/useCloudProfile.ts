@@ -94,6 +94,11 @@ export function useCloudProfile() {
       return;
     }
 
+    if (!db) {
+      setLoading(false);
+      return;
+    }
+
     const profileRef = doc(db, 'profiles', uid);
 
     const unsubscribe = onSnapshot(
@@ -139,10 +144,26 @@ export function useCloudProfile() {
     );
 
     return () => unsubscribe();
-  }, [cachedCompletedModules, cachedProfile, cachedTotalPoints, db, setCachedCompletedModules, setCachedProfile, setCachedTotalPoints, uid]);
+  }, [
+    cachedCompletedModules,
+    cachedProfile,
+    cachedTotalPoints,
+    db,
+    setCachedCompletedModules,
+    setCachedProfile,
+    setCachedTotalPoints,
+    uid,
+  ]);
 
   useEffect(() => {
     if (!uid) {
+      return;
+    }
+
+    if (!db) {
+      if (cachedDailyRecord.date !== todayKey()) {
+        setDailyRecord(initialDailyRecord);
+      }
       return;
     }
 
@@ -171,6 +192,10 @@ export function useCloudProfile() {
   }, [cachedDailyRecord, db, setCachedDailyRecord, uid]);
 
   useEffect(() => {
+    if (!db) {
+      return;
+    }
+
     const leaderboardQuery = query(
       collection(db, 'leaderboards', 'weekly', 'entries'),
       orderBy('points', 'desc'),
@@ -221,6 +246,10 @@ export function useCloudProfile() {
       if (nextCompletedCandidate) {
         setCompletedModules(nextCompleted);
         setCachedCompletedModules(nextCompleted);
+      }
+
+      if (!db) {
+        return;
       }
 
       const batch = writeBatch(db);
@@ -280,6 +309,10 @@ export function useCloudProfile() {
       };
       setDailyRecord(optimisticRecord);
       setCachedDailyRecord(optimisticRecord);
+
+      if (!db) {
+        return;
+      }
 
       const dailyRunRef = doc(db, 'dailyRuns', targetUid, 'runs', date);
       const payload: Record<string, unknown> = {

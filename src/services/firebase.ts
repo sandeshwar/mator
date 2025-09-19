@@ -14,6 +14,7 @@ interface FirebaseEnvConfig {
 let app: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
 let firestoreInstance: Firestore | null = null;
+let initializationFailed = false;
 
 function readFirebaseConfig(): FirebaseEnvConfig {
   const env = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
@@ -37,39 +38,100 @@ function readFirebaseConfig(): FirebaseEnvConfig {
   return config;
 }
 
-function ensureApp(): FirebaseApp {
+function ensureApp(): FirebaseApp | null {
+  if (initializationFailed) {
+    return null;
+  }
+
   if (app) {
     return app;
   }
 
-  if (getApps().length) {
-    app = getApps()[0]!;
-  } else {
-    app = initializeApp(readFirebaseConfig());
+  try {
+    if (getApps().length) {
+      app = getApps()[0]!;
+    } else {
+      app = initializeApp(readFirebaseConfig());
+    }
+  } catch (error) {
+    initializationFailed = true;
+    console.error('Failed to initialize Firebase app', error);
+    return null;
   }
 
   return app;
 }
 
-export function getFirebaseAuth(): Auth {
-  if (!authInstance) {
-    authInstance = getAuth(ensureApp());
+export function getFirebaseAuth(): Auth | null {
+  if (authInstance) {
+    return authInstance;
   }
+
+  const ensured = ensureApp();
+  if (!ensured) {
+    return null;
+  }
+
+  try {
+    authInstance = getAuth(ensured);
+  } catch (error) {
+    initializationFailed = true;
+    console.error('Failed to initialize Firebase auth', error);
+    return null;
+  }
+
   return authInstance;
 }
 
-export function getFirestoreDb(): Firestore {
-  if (!firestoreInstance) {
-    firestoreInstance = getFirestore(ensureApp());
+export function getFirestoreDb(): Firestore | null {
+  if (firestoreInstance) {
+    return firestoreInstance;
   }
+
+  const ensured = ensureApp();
+  if (!ensured) {
+    return null;
+  }
+
+  try {
+    firestoreInstance = getFirestore(ensured);
+  } catch (error) {
+    initializationFailed = true;
+    console.error('Failed to initialize Firestore', error);
+    return null;
+  }
+
   return firestoreInstance;
 }
 
 export async function ensureAnonymousUser(): Promise<string> {
   const auth = getFirebaseAuth();
 
-  if (auth.currentUser) {
+  if (auth?.currentUser) {
     return auth.currentUser.uid;
+  }
+
+  if (!auth) {
+    const storageKey = 'mathquest-offline-uid';
+    if (typeof window !== 'undefined') {
+      try {
+        const existing = window.localStorage.getItem(storageKey);
+        if (existing) {
+          return existing;
+        }
+
+        const generated =
+          typeof window.crypto !== 'undefined' && typeof window.crypto.randomUUID === 'function'
+            ? window.crypto.randomUUID()
+            : `offline-${Math.random().toString(36).slice(2)}`;
+        window.localStorage.setItem(storageKey, generated);
+        return generated;
+      } catch (error) {
+        console.warn('Unable to persist offline user identifier', error);
+      }
+    }
+
+    return `offline-${Date.now()}`;
   }
 
   const result = await signInAnonymously(auth);
@@ -78,5 +140,11 @@ export async function ensureAnonymousUser(): Promise<string> {
 
 export function subscribeToAuthState(callback: (uid: string | null) => void) {
   const auth = getFirebaseAuth();
+
+  if (!auth) {
+    callback(null);
+    return () => {};
+  }
+
   return onAuthStateChanged(auth, (user) => callback(user ? user.uid : null));
 }
