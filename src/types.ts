@@ -61,3 +61,54 @@ export interface ProgressSnapshot {
   totalCount: number;
   completionRate: number;
 }
+
+export interface ScenarioParameter {
+  id: string;
+  label: string;
+  description: string;
+  min: number;
+  max: number;
+  step: number;
+  unit?: string;
+  defaultValue: number;
+  targetRange: [number, number];
+  insight: string;
+  caution: string;
+}
+
+export interface ScenarioPersonaContent {
+  cardDescription: string;
+  narrative: string;
+  objective: string;
+  baseline: { label: string; value: string; helper: string }[];
+}
+
+export interface ScenarioReward {
+  points: number;
+  badgeId?: string;
+  celebration: string;
+}
+
+export interface ScenarioDefinition {
+  id: string;
+  title: string;
+  icon: string;
+  accent: string;
+  moduleContext: {
+    id: string;
+    name: string;
+    insight: string;
+  };
+  personas: Record<Audience, ScenarioPersonaContent>;
+  parameters: ScenarioParameter[];
+  success: {
+    summary: string;
+    checkpoints: string[];
+  };
+  reward: ScenarioReward;
+}
+
+export interface ScenarioCompletionPayload {
+  scenarioId: string;
+  reward: ScenarioReward;
+}
