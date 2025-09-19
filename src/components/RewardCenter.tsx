@@ -1,14 +1,15 @@
 import { motion } from 'framer-motion';
-import { RewardBadge } from '../types';
+import { LeaderboardEntry, RewardBadge } from '../types';
 
 interface RewardCenterProps {
   badges: RewardBadge[];
   unlocked: string[];
   streak: number;
   totalPoints: number;
+  leaderboard: LeaderboardEntry[];
 }
 
-export const RewardCenter = ({ badges, unlocked, streak, totalPoints }: RewardCenterProps) => {
+export const RewardCenter = ({ badges, unlocked, streak, totalPoints, leaderboard }: RewardCenterProps) => {
   return (
     <section className="bg-white/5 border border-white/10 rounded-3xl px-6 py-6">
       <div className="flex items-center justify-between mb-4">
@@ -41,6 +42,27 @@ export const RewardCenter = ({ badges, unlocked, streak, totalPoints }: RewardCe
           );
         })}
       </div>
+
+      {leaderboard.length > 0 && (
+        <div className="mt-6 bg-white/5 border border-white/10 rounded-2xl p-4">
+          <h4 className="text-lg font-display text-white mb-3">Weekly Leaderboard</h4>
+          <ol className="space-y-2">
+            {leaderboard.map((entry, index) => (
+              <li key={entry.uid} className="flex items-center justify-between text-sm text-slate-200">
+                <span className="flex items-center gap-3">
+                  <span className="text-xs font-semibold text-slate-400 w-6">#{index + 1}</span>
+                  <span
+                    className="h-8 w-8 rounded-full border border-white/20 bg-cover bg-center"
+                    style={{ background: entry.avatar || 'linear-gradient(135deg,#1d4ed8,#9333ea)' }}
+                  />
+                  <span className="font-medium">{entry.name}</span>
+                </span>
+                <span className="text-xs text-slate-300">{entry.points} XP</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </section>
   );
 };

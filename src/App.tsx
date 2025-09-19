@@ -10,7 +10,7 @@ import { ScenarioShowcase } from './components/ScenarioShowcase';
 import { dailyChallenges } from './data/dailyChallenges';
 import { learningModules } from './data/modules';
 import { rewardBadges } from './data/rewards';
-import { usePersistentState } from './hooks/usePersistentState';
+import { DailyRecord, useCloudProfile } from './hooks/useCloudProfile';
 import {
   computeProgress,
   evaluateBadgeUnlocks,
@@ -22,18 +22,17 @@ import { DailyChallenge, LearningModule, UserProfile } from './types';
 
 const todayKey = () => new Date().toISOString().split('T')[0];
 
-type DailyRecord = {
-  date: string;
-  completed: string[];
-};
-
-const initialDailyRecord: DailyRecord = { date: '', completed: [] };
-
 export default function App() {
-  const [profile, setProfile] = usePersistentState<UserProfile | null>('mathquest-profile', null);
-  const [totalPoints, setTotalPoints] = usePersistentState<number>('mathquest-total-points', 0);
-  const [completedModules, setCompletedModules] = usePersistentState<string[]>('mathquest-completed-modules', []);
-  const [dailyRecord, setDailyRecord] = usePersistentState<DailyRecord>('mathquest-daily-record', initialDailyRecord);
+  const {
+    profile,
+    totalPoints,
+    completedModules,
+    dailyRecord,
+    leaderboard,
+    syncProfile,
+    recordDailyRun,
+    completeOnboarding,
+  } = useCloudProfile();
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [pulseMessage, setPulseMessage] = useState<string | null>(null);
 
@@ -51,11 +50,12 @@ export default function App() {
 
   const handleOnboardingComplete = useCallback(
     (nextProfile: UserProfile) => {
-      setProfile(nextProfile);
-      setActiveModuleId(nextProfile.unlockedModules[0] ?? null);
-      setPulseMessage('Welcome to MathQuest! 🚀');
+      void completeOnboarding(nextProfile).then((normalized) => {
+        setActiveModuleId(normalized.unlockedModules[0] ?? null);
+        setPulseMessage('Welcome to MathQuest! 🚀');
+      });
     },
-    [setProfile]
+    [completeOnboarding]
   );
 
   const personalizedModules = useMemo(() => {
@@ -88,16 +88,6 @@ export default function App() {
   const today = todayKey();
   const dailyCompleted = dailyRecord.date === today && dailyRecord.completed.includes(todayChallenge.id);
 
-  const updateProfile = useCallback(
-    (updater: (current: UserProfile) => UserProfile) => {
-      setProfile((current) => {
-        if (!current) return current;
-        return updater(current);
-      });
-    },
-    [setProfile]
-  );
-
   const pushCelebration = useCallback((message: string) => {
     setPulseMessage(message);
   }, []);
@@ -115,27 +105,29 @@ export default function App() {
       }
 
       const totalAfter = totalPoints + pointsAwarded;
-      setTotalPoints(totalAfter);
-      setCompletedModules((prev) => Array.from(new Set([...prev, module.id])));
+      const updatedCompleted = Array.from(new Set([...completedModules, module.id]));
+      const streakReady = evaluateStreak(profile, true, dailyRecord.updatedAt);
+      const enhancedProfile: UserProfile = {
+        ...streakReady,
+        unlockedModules: Array.from(nextUnlocked),
+      };
+      const badges = evaluateBadgeUnlocks(
+        enhancedProfile,
+        pointsAwarded,
+        totalAfter,
+        computeProgress(personalizedModules, Array.from(nextUnlocked)),
+        rewardBadges
+      );
 
-      updateProfile((current) => {
-        const streakReady = evaluateStreak(current, true);
-        const enhancedProfile: UserProfile = {
-          ...streakReady,
-          unlockedModules: Array.from(nextUnlocked),
-        };
-        const badges = evaluateBadgeUnlocks(
-          enhancedProfile,
-          pointsAwarded,
-          totalAfter,
-          computeProgress(personalizedModules, Array.from(nextUnlocked)),
-          rewardBadges
-        );
+      const nextProfile: UserProfile = {
+        ...enhancedProfile,
+        badges,
+      };
 
-        return {
-          ...enhancedProfile,
-          badges,
-        };
+      void syncProfile({
+        profile: nextProfile,
+        totalPoints: totalAfter,
+        completedModules: updatedCompleted,
       });
 
       if (nextModule) {
@@ -145,7 +137,16 @@ export default function App() {
         pushCelebration(`You mastered ${module.name}! 🎉`);
       }
     },
-    [personalizedModules, profile, setCompletedModules, setTotalPoints, totalPoints, unlockedIds, updateProfile, pushCelebration]
+    [
+      completedModules,
+      dailyRecord.updatedAt,
+      personalizedModules,
+      profile,
+      pushCelebration,
+      syncProfile,
+      totalPoints,
+      unlockedIds,
+    ]
   );
 
   const handleChallengeComplete = useCallback(
@@ -154,32 +155,41 @@ export default function App() {
       const todayKeyed = todayKey();
       const updatedRecord: DailyRecord =
         dailyRecord.date === todayKeyed
-          ? { date: todayKeyed, completed: Array.from(new Set([...dailyRecord.completed, challenge.id])) }
-          : { date: todayKeyed, completed: [challenge.id] };
+          ? {
+              date: todayKeyed,
+              completed: Array.from(new Set([...dailyRecord.completed, challenge.id])),
+              updatedAt: new Date().toISOString(),
+            }
+          : { date: todayKeyed, completed: [challenge.id], updatedAt: new Date().toISOString() };
 
-      setDailyRecord(updatedRecord);
+      void recordDailyRun({
+        date: updatedRecord.date,
+        completed: updatedRecord.completed,
+        pointsAwarded: challenge.reward.points,
+      });
       const pointsAwarded = challenge.reward.points;
       const totalAfter = totalPoints + pointsAwarded;
-      setTotalPoints(totalAfter);
+      const streakReady = evaluateStreak(profile, true, updatedRecord.updatedAt ?? dailyRecord.updatedAt);
+      const badges = evaluateBadgeUnlocks(
+        streakReady,
+        pointsAwarded,
+        totalAfter,
+        progress,
+        rewardBadges
+      );
+      const nextProfile: UserProfile = {
+        ...streakReady,
+        badges,
+      };
 
-      updateProfile((current) => {
-        const streakReady = evaluateStreak(current, true);
-        const badges = evaluateBadgeUnlocks(
-          streakReady,
-          pointsAwarded,
-          totalAfter,
-          progress,
-          rewardBadges
-        );
-        return {
-          ...streakReady,
-          badges,
-        };
+      void syncProfile({
+        profile: nextProfile,
+        totalPoints: totalAfter,
       });
 
       pushCelebration(`Daily challenge cleared! +${pointsAwarded} pts 🎯`);
     },
-    [dailyRecord, progress, profile, pushCelebration, setDailyRecord, setTotalPoints, totalPoints, updateProfile]
+    [dailyRecord, progress, profile, pushCelebration, recordDailyRun, syncProfile, totalPoints]
   );
 
   if (!profile) {
@@ -221,7 +231,13 @@ export default function App() {
             onComplete={handleChallengeComplete}
           />
 
-          <RewardCenter badges={rewardBadges} unlocked={profile.badges} streak={profile.streak} totalPoints={totalPoints} />
+          <RewardCenter
+            badges={rewardBadges}
+            unlocked={profile.badges}
+            streak={profile.streak}
+            totalPoints={totalPoints}
+            leaderboard={leaderboard}
+          />
         </div>
       </div>
 

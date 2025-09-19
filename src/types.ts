@@ -61,3 +61,10 @@ export interface ProgressSnapshot {
   totalCount: number;
   completionRate: number;
 }
+
+export interface LeaderboardEntry {
+  uid: string;
+  name: string;
+  avatar: string;
+  points: number;
+}

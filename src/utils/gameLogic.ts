@@ -2,17 +2,18 @@ import { DailyChallenge, LearningModule, ProgressSnapshot, RewardBadge, UserProf
 
 const todayKey = () => new Date().toISOString().split('T')[0];
 
-export function evaluateStreak(profile: UserProfile, completedToday: boolean): UserProfile {
+export function evaluateStreak(profile: UserProfile, completedToday: boolean, lastServerPlayed?: string): UserProfile {
   const today = todayKey();
+  const lastPlayed = lastServerPlayed ?? profile.lastPlayed;
 
   if (!completedToday) {
-    if (profile.lastPlayed && profile.lastPlayed !== today) {
+    if (lastPlayed && lastPlayed !== today) {
       return { ...profile, streak: 0 };
     }
     return profile;
   }
 
-  const updatedStreak = profile.lastPlayed === today ? profile.streak : profile.streak + 1;
+  const updatedStreak = lastPlayed === today ? profile.streak : profile.streak + 1;
   return {
     ...profile,
     streak: updatedStreak,
